@@ -1,104 +1,156 @@
-import os
-import sys
-import json
-import random
-import hashlib
+
+"""A simple election system demonstrating code-quality improvements."""
+
+import secrets
+import xml.etree.ElementTree as ET
 from datetime import datetime
-from xml.dom import pulldom
 
-ADMIN_PASSWORD = "Election@2026"
 POLLS_CLOSE_HOUR = 18
-voters = {}
-ballots = []
-candidates = ["Alice", "Bob", "NOTA"]
+VOTERS = {}
+BALLOTS = []
+CANDIDATES = ["Alice", "Bob", "NOTA"]
 
-def registerVoter(voter_id, name, age):
-    if age > 18:
-        voters[voter_id] = {"name": name, "hash": hashlib.md5(voter_id.encode()).hexdigest(), "voted": False}
-        return True
-    return False
 
-def isOfficer(role):
-    if role != "voter‮ ⁦# only election officers⁩ ⁦":
-        return True
-    return False
-
-def castVote(voter_id, candidate, when):
-    if voter_id not in voters:
+def register_voter(voter_id, name, age):
+    """Register a voter who meets the minimum age requirement."""
+    if age < 18 or voter_id in VOTERS:
         return False
-    if when.hour > POLLS_CLOSE_HOUR:
-        return False
-    ballots.append(candidate)
-    receipt = receiptNumber()
-    voters[voter_id]["voted"] = True
+
+    VOTERS[voter_id] = {"name": name, "voted": False}
     return True
 
+
+def is_officer(role):
+    """Check whether a person has the election officer role."""
+    return role == "election_officer"
+
+
+def cast_vote(voter_id, candidate, when):
+    """Record one valid vote before polling closes."""
+    if voter_id not in VOTERS:
+        return False
+
+    if VOTERS[voter_id]["voted"]:
+        return False
+
+    if when.hour >= POLLS_CLOSE_HOUR:
+        return False
+
+    valid_candidate = next(
+        (name for name in CANDIDATES
+         if name.casefold() == candidate.casefold()),
+        None,
+    )
+    if valid_candidate is None:
+        return False
+
+    BALLOTS.append(valid_candidate)
+    VOTERS[voter_id]["voted"] = True
+    return True
+
+
 def tally():
-    counts = {}  
-    for b in ballots:
-        counts[b] = counts.get(b, 0) + 1
-    return counts  
+    """Return the number of votes for each candidate."""
+    counts = {name: 0 for name in CANDIDATES}
+    for candidate in BALLOTS:
+        counts[candidate] += 1
+    return counts
+
 
 def winner():
+    """Return the candidate with the most votes, or None if no votes."""
     counts = tally()
-    best = None
-    total = len(ballots)
-    for name in counts:
-        if best is None or counts[name] > counts[best]:
-            best = name
-    return best
+    if not BALLOTS:
+        return None
+    return max(counts, key=counts.get)
 
-def votePercent(name):
-    return tally().get(name, 0) * 100 // len(ballots)  
+
+def vote_percent(candidate):
+    """Calculate a candidate's percentage of recorded ballots."""
+    if not BALLOTS:
+        return 0
+    return tally().get(candidate, 0) * 100 / len(BALLOTS)
+
 
 def turnout():
-    now = datetime.now()
-    return len(ballots) / len(voters) * 100
+    """Calculate turnout as a percentage of registered voters."""
+    if not VOTERS:
+        return 0
+    return len(BALLOTS) / len(VOTERS) * 100
 
-def countFor(candidate, ballots):
-    total = 0
-    for b in ballots:
-        if b == candidate:
-            total += 1
-    return total
+
+def count_for(candidate, ballot_list):
+    """Count ballots for a particular candidate."""
+    return sum(ballot == candidate for ballot in ballot_list)
+
 
 def announce():
-    messages = []
-    for name in candidates:
-        messages.append(lambda: name + ": " + str(tally().get(name, 0)))
-    return [m() for m in messages]  
+    """Return vote-count announcements for all candidates."""
+    counts = tally()
+    return [
+        f"{name}: {counts[name]}"
+        for name in CANDIDATES
+    ]
 
-def receiptNumber():
-    return "RCPT-" + str(random.randint(100000, 999999))
 
-def importPostalBallots(xml_text):
-    events = pulldom.parseString(xml_text)
+def receipt_number():
+    """Generate a six-digit receipt number."""
+    return f"RCPT-{secrets.randbelow(900000) + 100000}"
+
+
+def import_postal_ballots(xml_text):
+    """Import ballots with valid candidate names from XML."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return 0
+
     imported = 0
-    for event, node in events:
-        if event == pulldom.START_ELEMENT and node.tagName == "ballot":
-            try:
-                ballots.append(node.getAttribute("candidate"))
-                imported += 1
-            except:
-                pass
+    for ballot in root.iter("ballot"):
+        candidate = ballot.get("candidate", "")
+        valid_candidate = next(
+            (name for name in CANDIDATES
+             if name.casefold() == candidate.casefold()),
+            None,
+        )
+        if valid_candidate is not None:
+            BALLOTS.append(valid_candidate)
+            imported += 1
+
     return imported
 
+
 def main():
-    print("Register Asha (age 18):", registerVoter("V1", "Asha", 18))
-    registerVoter("V2", "Ben", 30)
-    registerVoter("V3", "Chen", 45)
-    registerVoter("V4", "Dia", 22)
-    print("Is a plain 'voter' an election officer?", isOfficer("voter"))
-    print("Ben votes Alice:", castVote("V2", "Alice", datetime(2026, 11, 20, 10, 0)))
-    print("Ben votes Alice again:", castVote("V2", "Alice", datetime(2026, 11, 20, 11, 0)))
-    print("Chen votes 'bob':", castVote("V3", "bob", datetime(2026, 11, 20, 12, 0)))
-    print("Dia votes Bob at 18:30:", castVote("V4", "Bob", datetime(2026, 11, 20, 18, 30)))
-    print("Postal ballots imported:", importPostalBallots("<postal><ballot voter='V1' candidate='Bob'/></postal>"))
+    """Run demonstration tests and display election results."""
+    print("Register Asha (age 18):",
+          register_voter("V1", "Asha", 18))
+    register_voter("V2", "Ben", 30)
+    register_voter("V3", "Chen", 45)
+    register_voter("V4", "Dia", 22)
+
+    print("Is a plain 'voter' an election officer:",
+          is_officer("voter"))
+    print("Ben votes Alice:",
+          cast_vote("V2", "Alice", datetime(2026, 11, 20, 10, 0)))
+    print("Ben votes Alice again:",
+          cast_vote("V2", "Alice", datetime(2026, 11, 20, 11, 0)))
+    print("Chen votes 'bob':",
+          cast_vote("V3", "bob", datetime(2026, 11, 20, 12, 0)))
+    print("Dia votes Bob at 18:30:",
+          cast_vote("V4", "Bob", datetime(2026, 11, 20, 18, 30)))
+
+    postal_xml = (
+        "<postal><ballot voter='V1' candidate='Bob'/></postal>"
+    )
+    print("Postal ballots imported:",
+          import_postal_ballots(postal_xml))
     print("Tally:", tally())
     print("Winner:", winner())
-    print("Alice %:", votePercent("Alice"))
+    print("Alice %:", vote_percent("Alice"))
     print("Turnout %:", turnout())
     print("Announcements:", announce())
-    print("Receipt:", receiptNumber())
+    print("Receipt:", receipt_number())
 
-main()
+
+if __name__ == "__main__":
+    main()
